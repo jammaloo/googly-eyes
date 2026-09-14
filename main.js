@@ -384,7 +384,9 @@ async function start() {
 
   // Some environments never settle the camera request (in-app browsers that
   // can't show a permission prompt, or a camera held by another app) — time
-  // out with a useful message instead of hanging forever.
+  // out with a useful message instead of hanging forever. Generous, because
+  // the user's decision time on the permission prompt counts here too.
+  const CAMERA_TIMEOUT_MS = 60000;
   const cameraWithTimeout = Promise.race([
     cameraPromise,
     new Promise((_, reject) =>
@@ -392,7 +394,7 @@ async function start() {
         const err = new Error("camera request timed out");
         err.name = "CameraTimeoutError";
         reject(err);
-      }, 15000)
+      }, CAMERA_TIMEOUT_MS)
     ),
   ]);
 
