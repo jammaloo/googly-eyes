@@ -18,61 +18,58 @@ const MODEL_URL =
 
 const MAX_FACES = 4;
 
-// Physics constants, expressed in units of the eyeball radius R so the
-// behavior is identical at any face size or camera distance.
-const GRAVITY = 16; // R / s², pulling the pupil toward the "low" side of the head
-const INERTIA_GAIN = 0.22; // how strongly head acceleration shoves the pupil
-const INERTIA_MAX = 55; // R / s², cap on the inertial force
-const LINEAR_DAMPING = 1.8; // 1/s, air drag on the pupil
-const RESTITUTION = 0.38; // bounce energy kept when hitting the socket wall
+// Googly-eye physics: each pupil is a ball simulated in screen space inside a
+// circular socket that rides on the detected eye. Gravity (scaled by eye size,
+// so every eye wobbles at the same tempo — a real ~4 Hz googly swing) pulls
+// the pupil to the bottom, and the rattle comes from the pupil bouncing off
+// the MOVING socket wall as the face moves. No acceleration estimation.
+const GRAVITY = 260; // px/s² per px of socket radius
 const PUPIL_RATIO = 0.56; // pupil radius / socket radius
-const MAX_ACCEL = 9000; // px / s², clamp on estimated head acceleration
+const RESTITUTION = 0.42; // energy kept when the pupil bounces off the wall
+const BOUNCE_MIN = 3; // R/s; contacts slower than this rest instead of bounce
+const WALL_FRICTION = 0.985; // tangential velocity kept while touching
+const AIR_DAMPING = 0.4; // 1/s velocity decay in flight
+const SOCKET_TRACK = 45; // 1/s rate the socket chases the detected eye
+const SUBSTEP = 1 / 120; // fixed physics step, runs inside every frame
+const MAX_SUBSTEPS = 8;
 
 // Face landmarks (478-point model): eye corners, lids, iris centers.
 const LEFT_EYE = { outer: 33, inner: 133, top: 159, bottom: 145, iris: 468 };
 const RIGHT_EYE = { outer: 263, inner: 362, top: 386, bottom: 374, iris: 473 };
-const ROLL_FROM = 33; // left eye outer corner
-const ROLL_TO = 263; // right eye outer corner
 
 let landmarker = null;
 let running = false;
 let lastVideoTime = -1;
 let lastT = 0;
+let physAcc = 0; // leftover time for the fixed-step physics loop
+let nextFaceId = 1;
 
-// Per-face physics state, keyed by detection index (0..MAX_FACES-1).
-// Each eye: pupil offset/velocity, smoothed socket geometry, head-motion estimators.
+// Per-face state: a pair of eye simulations plus matching/expiry bookkeeping.
+// Keyed by an arbitrary id (not detection order) so people can cross paths
+// without their physics state teleporting.
 const faceStates = new Map();
+const FACE_EXPIRY_MS = 700; // drop state for faces unseen this long
 
 function makeEye() {
   return {
+    init: false,
+    cx: 0,
+    cy: 0,
+    r: 20, // simulated socket center/radius, chases the detection target
+    tx: 0,
+    ty: 0,
+    tr: 20, // target geometry from the latest detection
+    svx: 0,
+    svy: 0, // socket velocity estimate, felt by the pupil on wall contact
     px: 0,
-    py: 0, // pupil offset from socket center, px (relative frame)
+    py: 0,
     vx: 0,
-    vy: 0, // pupil velocity, px/s
-    cx: null, // smoothed socket center, css px
-    cy: null,
-    r: 0, // smoothed socket radius, css px
-    roll: 0, // smoothed head roll, rad
-    prevCx: null, // raw center last step, for velocity estimation
-    prevCy: null,
-    evx: 0, // smoothed socket velocity
-    evy: 0,
-    prevEvx: 0,
-    prevEvy: 0,
+    vy: 0, // pupil absolute screen position + velocity
   };
 }
 
 function setStatus(message) {
   statusEl.textContent = message || "";
-}
-
-function ensureFaceState(i) {
-  let s = faceStates.get(i);
-  if (!s) {
-    s = { left: makeEye(), right: makeEye() };
-    faceStates.set(i, s);
-  }
-  return s;
 }
 
 // MediaPipe gives normalized coords relative to the video frame; the video is
@@ -110,92 +107,67 @@ function eyeGeometry(lm, spec) {
   };
 }
 
-// One physics step for a pupil inside its socket. Pupil position is tracked in
-// a socket-relative frame; the socket carries it around as the face moves.
-function stepEye(eye, geo, roll, dt) {
-  // Smooth the socket so detection jitter doesn't teleport the eyeball.
-  if (eye.cx === null) {
-    eye.cx = geo.cx;
-    eye.cy = geo.cy;
-    eye.r = geo.r;
-    eye.roll = roll;
-    eye.prevCx = geo.cx;
-    eye.prevCy = geo.cy;
-  } else {
-    const k = 0.5;
-    eye.cx += (geo.cx - eye.cx) * k;
-    eye.cy += (geo.cy - eye.cy) * k;
-    eye.r += (geo.r - eye.r) * k;
-    let d = roll - eye.roll;
-    d = Math.atan2(Math.sin(d), Math.cos(d));
-    eye.roll += d * k;
+// One fixed physics step for a pupil. The pupil is a ball in screen space;
+// the socket is a circle that chases the detected eye position. When the
+// face moves, the socket wall catches up to the pupil and flings it — the
+// bounce comes from the collision with the moving wall, not from any
+// explicitly estimated head acceleration.
+function stepEyePhysics(e, h) {
+  if (!e.init) {
+    e.init = true;
+    e.cx = e.tx;
+    e.cy = e.ty;
+    e.r = Math.max(e.tr, 2);
+    e.px = e.cx;
+    e.py = e.cy + e.r * (1 - PUPIL_RATIO); // start resting at the bottom
+    e.vx = (Math.random() - 0.5) * 6 * e.r; // little wobble on appearance
+    e.vy = 0;
   }
 
-  const R = Math.max(eye.r, 2);
+  // Socket chases the detected geometry; how fast it moves here is the
+  // "throw" the pupil feels on contact.
+  const k = 1 - Math.exp(-SOCKET_TRACK * h);
+  const nx = e.cx + (e.tx - e.cx) * k;
+  const ny = e.cy + (e.ty - e.cy) * k;
+  e.r += (Math.max(e.tr, 2) - e.r) * k;
+  e.svx = (nx - e.cx) / h;
+  e.svy = (ny - e.cy) / h;
+  e.cx = nx;
+  e.cy = ny;
 
-  // Head motion -> inertial force on the pupil (things that lag behind).
-  if (eye.prevCx !== null && dt > 0) {
-    const ivx = (geo.cx - eye.prevCx) / dt;
-    const ivy = (geo.cy - eye.prevCy) / dt;
-    eye.evx += (ivx - eye.evx) * 0.5;
-    eye.evy += (ivy - eye.evy) * 0.5;
-  }
-  eye.prevCx = geo.cx;
-  eye.prevCy = geo.cy;
+  // Gravity and light air drag, then integrate.
+  e.vy += GRAVITY * e.r * h;
+  const damp = Math.exp(-AIR_DAMPING * h);
+  e.vx *= damp;
+  e.vy *= damp;
+  e.px += e.vx * h;
+  e.py += e.vy * h;
 
-  let fx = 0;
-  let fy = 0;
-  if (dt > 0) {
-    const ax = clamp((eye.evx - eye.prevEvx) / dt, MAX_ACCEL);
-    const ay = clamp((eye.evy - eye.prevEvy) / dt, MAX_ACCEL);
-    fx = clamp(-ax * INERTIA_GAIN, INERTIA_MAX * R);
-    fy = clamp(-ay * INERTIA_GAIN, INERTIA_MAX * R);
-  }
-  eye.prevEvx = eye.evx;
-  eye.prevEvy = eye.evy;
-
-  // Gravity in the head's local frame, so tilting the head rolls the "down"
-  // direction: the pupil settles toward the low eye, like real googly eyes.
-  const g = GRAVITY * R;
-  fx += Math.sin(eye.roll) * g;
-  fy += Math.cos(eye.roll) * g;
-
-  // Integrate with drag.
-  const damp = Math.exp(-LINEAR_DAMPING * dt);
-  eye.vx = eye.vx * damp + fx * dt;
-  eye.vy = eye.vy * damp + fy * dt;
-  eye.px += eye.vx * dt;
-  eye.py += eye.vy * dt;
-
-  // Constrain the pupil inside the socket; bounce off the wall.
-  const maxLen = Math.max(R * (1 - PUPIL_RATIO), 0.5);
-  const len = Math.hypot(eye.px, eye.py);
-  if (len > maxLen) {
-    const nx = eye.px / len;
-    const ny = eye.py / len;
-    eye.px = nx * maxLen;
-    eye.py = ny * maxLen;
-    const vn = eye.vx * nx + eye.vy * ny;
+  // Constrain the pupil inside the socket; bounce off the wall using the
+  // velocity RELATIVE to the wall, so a moving socket transfers its motion.
+  const maxOff = Math.max(e.r * (1 - PUPIL_RATIO), 0.5);
+  const dx = e.px - e.cx;
+  const dy = e.py - e.cy;
+  const dist = Math.hypot(dx, dy);
+  if (dist > maxOff) {
+    const wnx = dx / dist;
+    const wny = dy / dist;
+    e.px = e.cx + wnx * maxOff;
+    e.py = e.cy + wny * maxOff;
+    const rvx = e.vx - e.svx;
+    const rvy = e.vy - e.svy;
+    const vn = rvx * wnx + rvy * wny;
     if (vn > 0) {
-      eye.vx -= (1 + RESTITUTION) * vn * nx;
-      eye.vy -= (1 + RESTITUTION) * vn * ny;
-      eye.vx *= 0.94; // tangential friction
-      eye.vy *= 0.94;
+      const bounce = vn > BOUNCE_MIN * e.r ? RESTITUTION : 0;
+      const nvx = rvx - (1 + bounce) * vn * wnx;
+      const nvy = rvy - (1 + bounce) * vn * wny;
+      e.vx = nvx * WALL_FRICTION + e.svx;
+      e.vy = nvy * WALL_FRICTION + e.svy;
     }
   }
-
-  // Let it come to rest instead of micro-jittering at the bottom.
-  if (Math.hypot(eye.vx, eye.vy) < R * 0.02) {
-    eye.vx = 0;
-    eye.vy = 0;
-  }
 }
 
-function clamp(v, limit) {
-  return Math.max(-limit, Math.min(limit, v));
-}
-
-function processFaces(result, dt) {
+function processFaces(result, now) {
   const faces = result && result.faceLandmarks ? result.faceLandmarks : [];
   hud.hidden = faces.length > 0;
   if (faces.length > 0) {
@@ -203,20 +175,60 @@ function processFaces(result, dt) {
       faces.length === 1 ? "1 face found" : `${faces.length} faces found`;
   }
 
-  for (let i = 0; i < Math.min(faces.length, MAX_FACES); i++) {
-    const lm = faces[i];
-    const state = ensureFaceState(i);
+  const dets = [];
+  for (const lm of faces.slice(0, MAX_FACES)) {
     const left = eyeGeometry(lm, LEFT_EYE);
     const right = eyeGeometry(lm, RIGHT_EYE);
-    // Googly eyes come in pairs: give both eyes the average radius.
-    const pairR = (left.r + right.r) / 2;
+    const pairR = (left.r + right.r) / 2; // googly pairs share a size
     left.r = pairR;
     right.r = pairR;
-    const a = mapPoint(lm[ROLL_FROM].x, lm[ROLL_FROM].y);
-    const b = mapPoint(lm[ROLL_TO].x, lm[ROLL_TO].y);
-    const roll = Math.atan2(b.y - a.y, b.x - a.x);
-    stepEye(state.left, left, roll, dt);
-    stepEye(state.right, right, roll, dt);
+    dets.push({
+      left,
+      right,
+      cx: (left.cx + right.cx) / 2,
+      cy: (left.cy + right.cy) / 2,
+    });
+  }
+
+  // Match detections to existing states by proximity so a face keeps its
+  // physics as it moves (and when people cross); new faces get new state.
+  const threshold = Math.max(canvas.clientWidth, canvas.clientHeight) * 0.25;
+  const unused = new Set(faceStates.keys());
+  for (const det of dets) {
+    let bestId = null;
+    let bestDist = threshold;
+    for (const id of unused) {
+      const s = faceStates.get(id);
+      const d = Math.hypot(s.targetCx - det.cx, s.targetCy - det.cy);
+      if (d < bestDist) {
+        bestDist = d;
+        bestId = id;
+      }
+    }
+    let state;
+    if (bestId !== null) {
+      unused.delete(bestId);
+      state = faceStates.get(bestId);
+    } else {
+      state = {
+        left: makeEye(),
+        right: makeEye(),
+        targetCx: det.cx,
+        targetCy: det.cy,
+        lastSeen: now,
+      };
+      faceStates.set(nextFaceId, state);
+      nextFaceId++;
+    }
+    state.left.tx = det.left.cx;
+    state.left.ty = det.left.cy;
+    state.left.tr = det.left.r;
+    state.right.tx = det.right.cx;
+    state.right.ty = det.right.cy;
+    state.right.tr = det.right.r;
+    state.targetCx = det.cx;
+    state.targetCy = det.cy;
+    state.lastSeen = now;
   }
 }
 
@@ -238,10 +250,10 @@ function draw() {
 }
 
 function drawEye(eye) {
-  if (eye.cx === null || eye.r <= 0) return;
+  if (!eye.init || eye.r <= 0) return;
   const R = eye.r;
-  const px = eye.cx + eye.px;
-  const py = eye.cy + eye.py;
+  const px = eye.px;
+  const py = eye.py;
   const pupilR = R * PUPIL_RATIO;
 
   // Sclera.
@@ -293,6 +305,22 @@ function drawEye(eye) {
   ctx.fill();
 }
 
+// Fixed-timestep physics for all eyes, called once per rendered frame. Runs
+// at a constant 120 Hz regardless of camera or display frame rate.
+function stepPhysics(dt, now) {
+  physAcc = Math.min(physAcc + dt, SUBSTEP * MAX_SUBSTEPS);
+  while (physAcc >= SUBSTEP) {
+    physAcc -= SUBSTEP;
+    for (const s of faceStates.values()) {
+      stepEyePhysics(s.left, SUBSTEP);
+      stepEyePhysics(s.right, SUBSTEP);
+    }
+  }
+  for (const [id, s] of faceStates) {
+    if (now - s.lastSeen > FACE_EXPIRY_MS) faceStates.delete(id);
+  }
+}
+
 function frame(now) {
   if (!running) return;
   const dt = Math.min(Math.max((now - lastT) / 1000, 0.001), 0.05);
@@ -302,11 +330,12 @@ function frame(now) {
     lastVideoTime = video.currentTime;
     try {
       const result = landmarker.detectForVideo(video, now);
-      processFaces(result, dt);
+      processFaces(result, now);
     } catch (err) {
       console.error("Detection failed:", err);
     }
   }
+  stepPhysics(dt, now);
   draw();
   requestAnimationFrame(frame);
 }

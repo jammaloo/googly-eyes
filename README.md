@@ -17,14 +17,15 @@ they settle toward the low side when you tilt your head — just like the craft
 - **Googly eyes** — each eye gets a white socket circle sized from its landmark
   geometry (paired eyes share a radius, like real googly eyes), drawn on a
   canvas overlay above the mirrored selfie video.
-- **Pupil physics** — each pupil is a little point mass inside its socket:
-  - gravity always pulls it "down" *in the head's local frame*, so tilting your
-    head makes the pupil roll to the new low side;
-  - head movement applies an inertial force opposite to the acceleration, so
-    the pupils lag, swing, and rattle as you move;
-  - collisions with the socket wall bounce with restitution + friction, plus
-    linear drag — tuned in units of eyeball radius so it behaves the same at
-    any distance from the camera.
+- **Pupil physics** — each pupil is a ball simulated in screen space inside a
+  circular socket that rides on the detected eye:
+  - gravity — scaled by eye size, so every eye wobbles at the same tempo
+    (~4 Hz, like the real toy) — pulls the pupil to the bottom of the socket;
+  - when the face moves, the socket wall catches the pupil and flings it: the
+    rattle comes from bouncing off the *moving* wall (with restitution,
+    contact friction, and light air drag), not from estimated acceleration;
+  - physics runs at a fixed 120 Hz substep regardless of camera or display
+    frame rate, and each face keeps its state as it moves around.
 
 ## Run locally
 
