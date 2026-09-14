@@ -257,16 +257,9 @@ body {
 }
 
 h1 {
-  margin: 0 0 8px;
+  margin: 0 0 14px;
   font-size: 30px;
   letter-spacing: -0.02em;
-}
-
-.tagline {
-  margin: 0 0 22px;
-  color: var(--muted);
-  font-size: 15px;
-  line-height: 1.5;
 }
 
 #start-button {
