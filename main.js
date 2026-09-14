@@ -9,6 +9,10 @@ const overlay = document.getElementById("overlay");
 const hud = document.getElementById("hud");
 const statusEl = document.getElementById("status");
 const startBtn = document.getElementById("start-button");
+const settingsBtn = document.getElementById("settings-button");
+const settingsPanel = document.getElementById("settings-panel");
+const settingsRows = document.getElementById("settings-rows");
+const settingsReset = document.getElementById("settings-reset");
 const ctx = canvas.getContext("2d");
 
 const WASM_URL =
@@ -23,15 +27,103 @@ const MAX_FACES = 4;
 // so every eye wobbles at the same tempo — a real ~4 Hz googly swing) pulls
 // the pupil to the bottom, and the rattle comes from the pupil bouncing off
 // the MOVING socket wall as the face moves. No acceleration estimation.
-const GRAVITY = 260; // px/s² per px of socket radius
-const PUPIL_RATIO = 0.56; // pupil radius / socket radius
-const RESTITUTION = 0.42; // energy kept when the pupil bounces off the wall
-const BOUNCE_MIN = 3; // R/s; contacts slower than this rest instead of bounce
-const WALL_FRICTION = 0.985; // tangential velocity kept while touching
-const AIR_DAMPING = 0.4; // 1/s velocity decay in flight
-const SOCKET_TRACK = 45; // 1/s rate the socket chases the detected eye
+// The knobs live in P (mutable, tweakable live from the settings panel).
+const PHYS_DEFAULTS = {
+  GRAVITY: 260, // px/s² per px of socket radius
+  PUPIL_RATIO: 0.56, // pupil radius / socket radius
+  RESTITUTION: 0.42, // energy kept when the pupil bounces off the wall
+  BOUNCE_MIN: 3, // R/s; contacts slower than this rest instead of bounce
+  WALL_FRICTION: 0.985, // tangential velocity kept while touching
+  AIR_DAMPING: 0.4, // 1/s velocity decay in flight
+  SOCKET_TRACK: 45, // 1/s rate the socket chases the detected eye
+};
+const P = { ...PHYS_DEFAULTS };
 const SUBSTEP = 1 / 120; // fixed physics step, runs inside every frame
 const MAX_SUBSTEPS = 8;
+
+// Which knobs appear in the settings panel, and their slider ranges.
+const SETTINGS_SCHEMA = [
+  {
+    key: "GRAVITY",
+    label: "Gravity",
+    hint: "How hard pupils are pulled to the bottom",
+    min: 50,
+    max: 600,
+    step: 5,
+    fmt: (v) => `${Math.round(v)}`,
+  },
+  {
+    key: "RESTITUTION",
+    label: "Bounciness",
+    hint: "Energy kept when the pupil hits the wall",
+    min: 0,
+    max: 0.9,
+    step: 0.01,
+    fmt: (v) => v.toFixed(2),
+  },
+  {
+    key: "AIR_DAMPING",
+    label: "Swing decay",
+    hint: "Higher stops the swinging sooner",
+    min: 0,
+    max: 2,
+    step: 0.05,
+    fmt: (v) => v.toFixed(2),
+  },
+  {
+    key: "SOCKET_TRACK",
+    label: "Motion response",
+    hint: "How sharply face movement flings the pupil",
+    min: 10,
+    max: 90,
+    step: 1,
+    fmt: (v) => `${Math.round(v)}`,
+  },
+  {
+    key: "WALL_FRICTION",
+    label: "Wall friction",
+    hint: "Grip between pupil and socket wall",
+    min: 0.9,
+    max: 1,
+    step: 0.001,
+    fmt: (v) => v.toFixed(3),
+  },
+  {
+    key: "PUPIL_RATIO",
+    label: "Pupil size",
+    hint: "Pupil size relative to the eye",
+    min: 0.35,
+    max: 0.7,
+    step: 0.01,
+    fmt: (v) => v.toFixed(2),
+  },
+];
+
+const SETTINGS_STORAGE_KEY = "googly-physics";
+
+function loadPhysicsSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY));
+    if (saved && typeof saved === "object") {
+      for (const s of SETTINGS_SCHEMA) {
+        const v = saved[s.key];
+        if (Number.isFinite(v)) {
+          P[s.key] = Math.min(s.max, Math.max(s.min, v));
+        }
+      }
+    }
+  } catch {
+    // ignore corrupt saved settings and keep defaults
+  }
+}
+
+function savePhysicsSettings() {
+  try {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(P));
+  } catch {
+    // private mode etc. — settings just won't persist
+  }
+}
 
 // Face landmarks (478-point model): eye corners, lids, iris centers.
 const LEFT_EYE = { outer: 33, inner: 133, top: 159, bottom: 145, iris: 468 };
@@ -70,6 +162,77 @@ function makeEye() {
 
 function setStatus(message) {
   statusEl.textContent = message || "";
+}
+
+// Build the settings panel rows and wire them to P live.
+function initSettings() {
+  const syncRow = (s, input, val) => {
+    input.value = P[s.key];
+    val.textContent = s.fmt(P[s.key]);
+  };
+
+  for (const s of SETTINGS_SCHEMA) {
+    const row = document.createElement("div");
+    row.className = "setting";
+
+    const top = document.createElement("div");
+    top.className = "setting-top";
+    const label = document.createElement("label");
+    label.textContent = s.label;
+    const val = document.createElement("span");
+    val.className = "setting-val";
+    top.append(label, val);
+
+    const input = document.createElement("input");
+    input.type = "range";
+    input.min = s.min;
+    input.max = s.max;
+    input.step = s.step;
+    input.setAttribute("aria-label", s.label);
+    input.addEventListener("input", () => {
+      P[s.key] = Number(input.value);
+      val.textContent = s.fmt(P[s.key]);
+      savePhysicsSettings();
+    });
+
+    const hint = document.createElement("p");
+    hint.className = "setting-hint";
+    hint.textContent = s.hint;
+
+    row.append(top, input, hint);
+    syncRow(s, input, val);
+    row._sync = () => syncRow(s, input, val);
+    settingsRows.append(row);
+  }
+
+  const syncAll = () => {
+    for (const row of settingsRows.children) row._sync();
+  };
+
+  settingsReset.addEventListener("click", () => {
+    Object.assign(P, PHYS_DEFAULTS);
+    savePhysicsSettings();
+    syncAll();
+  });
+
+  const setPanelOpen = (open) => {
+    settingsPanel.hidden = !open;
+    settingsBtn.setAttribute("aria-expanded", String(open));
+  };
+
+  settingsBtn.addEventListener("click", () => {
+    setPanelOpen(settingsPanel.hidden);
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !settingsPanel.hidden) setPanelOpen(false);
+  });
+
+  document.addEventListener("pointerdown", (e) => {
+    if (settingsPanel.hidden) return;
+    if (settingsPanel.contains(e.target) || settingsBtn.contains(e.target)) return;
+    setPanelOpen(false);
+  });
 }
 
 // MediaPipe gives normalized coords relative to the video frame; the video is
@@ -119,14 +282,14 @@ function stepEyePhysics(e, h) {
     e.cy = e.ty;
     e.r = Math.max(e.tr, 2);
     e.px = e.cx;
-    e.py = e.cy + e.r * (1 - PUPIL_RATIO); // start resting at the bottom
+    e.py = e.cy + e.r * (1 - P.PUPIL_RATIO); // start resting at the bottom
     e.vx = (Math.random() - 0.5) * 6 * e.r; // little wobble on appearance
     e.vy = 0;
   }
 
   // Socket chases the detected geometry; how fast it moves here is the
   // "throw" the pupil feels on contact.
-  const k = 1 - Math.exp(-SOCKET_TRACK * h);
+  const k = 1 - Math.exp(-P.SOCKET_TRACK * h);
   const nx = e.cx + (e.tx - e.cx) * k;
   const ny = e.cy + (e.ty - e.cy) * k;
   e.r += (Math.max(e.tr, 2) - e.r) * k;
@@ -136,8 +299,8 @@ function stepEyePhysics(e, h) {
   e.cy = ny;
 
   // Gravity and light air drag, then integrate.
-  e.vy += GRAVITY * e.r * h;
-  const damp = Math.exp(-AIR_DAMPING * h);
+  e.vy += P.GRAVITY * e.r * h;
+  const damp = Math.exp(-P.AIR_DAMPING * h);
   e.vx *= damp;
   e.vy *= damp;
   e.px += e.vx * h;
@@ -145,7 +308,7 @@ function stepEyePhysics(e, h) {
 
   // Constrain the pupil inside the socket; bounce off the wall using the
   // velocity RELATIVE to the wall, so a moving socket transfers its motion.
-  const maxOff = Math.max(e.r * (1 - PUPIL_RATIO), 0.5);
+  const maxOff = Math.max(e.r * (1 - P.PUPIL_RATIO), 0.5);
   const dx = e.px - e.cx;
   const dy = e.py - e.cy;
   const dist = Math.hypot(dx, dy);
@@ -158,11 +321,11 @@ function stepEyePhysics(e, h) {
     const rvy = e.vy - e.svy;
     const vn = rvx * wnx + rvy * wny;
     if (vn > 0) {
-      const bounce = vn > BOUNCE_MIN * e.r ? RESTITUTION : 0;
+      const bounce = vn > P.BOUNCE_MIN * e.r ? P.RESTITUTION : 0;
       const nvx = rvx - (1 + bounce) * vn * wnx;
       const nvy = rvy - (1 + bounce) * vn * wny;
-      e.vx = nvx * WALL_FRICTION + e.svx;
-      e.vy = nvy * WALL_FRICTION + e.svy;
+      e.vx = nvx * P.WALL_FRICTION + e.svx;
+      e.vy = nvy * P.WALL_FRICTION + e.svy;
     }
   }
 }
@@ -254,7 +417,7 @@ function drawEye(eye) {
   const R = eye.r;
   const px = eye.px;
   const py = eye.py;
-  const pupilR = R * PUPIL_RATIO;
+  const pupilR = R * P.PUPIL_RATIO;
 
   // Sclera.
   const socket = ctx.createRadialGradient(
@@ -455,6 +618,7 @@ async function start() {
 
     hud.hidden = false;
     hud.textContent = "Looking for faces…";
+    settingsBtn.hidden = false;
     running = true;
     lastVideoTime = -1;
     lastT = performance.now();
@@ -488,6 +652,8 @@ if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
   );
   startBtn.disabled = true;
 } else {
+  loadPhysicsSettings();
+  initSettings();
   preloadModel();
   startBtn.addEventListener("click", start);
 }

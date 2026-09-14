@@ -63,6 +63,118 @@ body {
   pointer-events: none;
 }
 
+/* Settings cog, top right. */
+#settings-button {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  right: calc(env(safe-area-inset-right, 0px) + 12px);
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.45);
+  color: var(--text);
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  z-index: 21;
+  transition: transform 0.18s ease, background 0.18s ease;
+}
+
+#settings-button:hover {
+  background: rgba(0, 0, 0, 0.65);
+  transform: rotate(30deg);
+}
+
+#settings-button:active {
+  transform: scale(0.92);
+}
+
+/* Slide-down settings panel. */
+#settings-panel {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 60px);
+  right: calc(env(safe-area-inset-right, 0px) + 12px);
+  width: min(320px, calc(100vw - 24px));
+  max-height: calc(100dvh - 90px);
+  overflow-y: auto;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: var(--card);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(10px);
+  z-index: 20;
+}
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.settings-head strong {
+  font-size: 14px;
+}
+
+#settings-reset {
+  appearance: none;
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+#settings-reset:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.setting {
+  padding: 9px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.setting-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.setting-top label {
+  color: var(--text);
+}
+
+.setting-val {
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.setting input[type="range"] {
+  width: 100%;
+  margin: 8px 0 0;
+  accent-color: var(--accent);
+  touch-action: pan-y;
+}
+
+.setting-hint {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
 /* Start / error overlay. */
 #overlay {
   position: fixed;

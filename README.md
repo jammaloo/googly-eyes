@@ -27,6 +27,13 @@ they settle toward the low side when you tilt your head — just like the craft
   - physics runs at a fixed 120 Hz substep regardless of camera or display
     frame rate, and each face keeps its state as it moves around.
 
+## Tuning
+
+A ⚙ button in the top-right corner opens live physics tuning: gravity,
+bounciness, swing decay, motion response, wall friction, and pupil size.
+Every slider applies immediately, settings persist in `localStorage`, and
+**Reset** restores the defaults.
+
 ## Run locally
 
 Any static server works (camera access requires `localhost` or HTTPS):
