@@ -405,7 +405,7 @@ async function start() {
   }, 20000);
 
   try {
-    const [landmarkerResult, stream] = await Promise.all([
+    const [stream, landmarkerResult] = await Promise.all([
       cameraWithTimeout,
       modelWhenReady,
     ]);
