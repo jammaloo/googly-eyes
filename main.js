@@ -311,20 +311,47 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
+// The camera prompt needs a user gesture, but loading the model does not —
+// so fetch + compile it the moment the page opens and reuse it on start.
+let modelPromise = null;
+
+function loadModel() {
+  if (!modelPromise) {
+    modelPromise = (async () => {
+      const fileset = await FilesetResolver.forVisionTasks(WASM_URL);
+      const createWith = (delegate) =>
+        FaceLandmarker.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath: MODEL_URL, delegate },
+          runningMode: "VIDEO",
+          numFaces: MAX_FACES,
+        });
+      // GPU is faster, but some environments have WebGL disabled — fall back
+      // to the slower CPU delegate rather than failing outright.
+      return createWith("GPU").catch(() => createWith("CPU"));
+    })().catch((err) => {
+      modelPromise = null; // allow a retry on the next start attempt
+      throw err;
+    });
+  }
+  return modelPromise;
+}
+
+function preloadModel() {
+  setStatus("Loading face detection model…");
+  loadModel().then(
+    () => setStatus("Model ready — tap Start when you are"),
+    (err) => {
+      console.error("Model preload failed:", err);
+      setStatus("Couldn't preload the model; it will retry when you start");
+    }
+  );
+}
+
 async function start() {
   startBtn.disabled = true;
-  setStatus("Loading face detection model…");
+  setStatus("Requesting camera…");
 
   try {
-    // Model + camera in parallel; both are needed before we can run.
-    const modelPromise = (async () => {
-      const fileset = await FilesetResolver.forVisionTasks(WASM_URL);
-      return FaceLandmarker.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
-        runningMode: "VIDEO",
-        numFaces: MAX_FACES,
-      });
-    })();
     const cameraPromise = navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: "user",
@@ -335,7 +362,7 @@ async function start() {
     });
 
     const [landmarkerResult, stream] = await Promise.all([
-      modelPromise,
+      loadModel(),
       cameraPromise,
     ]);
     landmarker = landmarkerResult;
@@ -372,5 +399,6 @@ if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
   );
   startBtn.disabled = true;
 } else {
+  preloadModel();
   startBtn.addEventListener("click", start);
 }
