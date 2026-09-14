@@ -1,0 +1,194 @@
+:root {
+  --bg: #0b0d12;
+  --card: rgba(22, 26, 36, 0.88);
+  --text: #eef1f7;
+  --muted: #9aa3b5;
+  --accent: #ffd23f;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  touch-action: manipulation;
+}
+
+/* Camera feed fills the screen, mirrored like a selfie view. */
+#video {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+  background: #000;
+}
+
+#canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Small status chip while running. */
+#hud {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--muted);
+  font-size: 13px;
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+}
+
+/* Start / error overlay. */
+#overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(80% 60% at 50% 0%, rgba(255, 210, 63, 0.09), transparent 70%),
+    radial-gradient(70% 50% at 50% 100%, rgba(64, 134, 255, 0.10), transparent 70%),
+    var(--bg);
+  z-index: 10;
+}
+
+#overlay.error {
+  background: linear-gradient(#1a0d10, var(--bg));
+}
+
+.card {
+  max-width: 420px;
+  width: 100%;
+  padding: 36px 28px;
+  border-radius: 24px;
+  background: var(--card);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  text-align: center;
+}
+
+/* Decorative googly eyes on the card. */
+.eyes {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.eye {
+  position: relative;
+  display: inline-block;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 42% 38%, #ffffff, #e9e9ee);
+  border: 3px solid #1b1e26;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+  animation: wobble 3.2s ease-in-out infinite;
+}
+
+.eye:nth-child(2) {
+  animation-delay: -1.6s;
+}
+
+.pupil {
+  position: absolute;
+  left: 50%;
+  top: 62%;
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #4a4a52, #0c0c0f 65%);
+}
+
+.pupil::after {
+  content: "";
+  position: absolute;
+  left: 18%;
+  top: 14%;
+  width: 26%;
+  height: 26%;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+@keyframes wobble {
+  0%, 100% { transform: rotate(-6deg); }
+  50% { transform: rotate(6deg); }
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: 30px;
+  letter-spacing: -0.02em;
+}
+
+.tagline {
+  margin: 0 0 22px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+#start-button {
+  appearance: none;
+  border: 0;
+  cursor: pointer;
+  padding: 14px 34px;
+  font-size: 17px;
+  font-weight: 600;
+  color: #14161c;
+  background: var(--accent);
+  border-radius: 999px;
+  box-shadow: 0 8px 24px rgba(255, 210, 63, 0.35);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+}
+
+#start-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(255, 210, 63, 0.45);
+}
+
+#start-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+#start-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+#status {
+  min-height: 20px;
+  margin: 16px 0 0;
+  font-size: 14px;
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+.privacy {
+  margin: 14px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}

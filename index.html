@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#0b0d12" />
+  <meta name="description" content="Physics-based googly eyes overlaid on your face using on-device face landmark detection. Works on mobile and desktop." />
+  <title>Googly Eyes</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='white' stroke='%23222' stroke-width='3'/%3E%3Ccircle cx='38' cy='40' r='14' fill='%23111'/%3E%3Ccircle cx='43' cy='35' r='4' fill='white'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <video id="video" playsinline muted autoplay hidden></video>
+  <canvas id="canvas" hidden></canvas>
+
+  <div id="hud" hidden></div>
+
+  <div id="overlay">
+    <div class="card">
+      <div class="eyes" aria-hidden="true">
+        <span class="eye"><span class="pupil"></span></span>
+        <span class="eye"><span class="pupil"></span></span>
+      </div>
+      <h1>Googly Eyes</h1>
+      <p class="tagline">
+        Point your camera at one or more faces and watch their eyes go full googly —
+        the pupils bounce and wobble with real physics as you move.
+      </p>
+      <button id="start-button" type="button">Start camera</button>
+      <p id="status" role="status"></p>
+      <p class="privacy">Everything runs on your device — no video ever leaves it.</p>
+    </div>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
