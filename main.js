@@ -351,40 +351,98 @@ async function start() {
   startBtn.disabled = true;
   setStatus("Requesting camera…");
 
-  try {
-    const cameraPromise = navigator.mediaDevices.getUserMedia({
+  // Track each half so the status always shows which stage is pending — if
+  // something stalls (ignored prompt, slow download) it's visible.
+  let cameraReady = false;
+  let modelReady = false;
+  const updateStage = () => {
+    if (cameraReady && modelReady) setStatus("Starting…");
+    else if (cameraReady) setStatus("Camera ready — finishing model load…");
+    else if (modelReady) setStatus("Model ready — waiting for camera…");
+  };
+
+  const cameraPromise = navigator.mediaDevices
+    .getUserMedia({
       video: {
         facingMode: "user",
         width: { ideal: 1280 },
         height: { ideal: 720 },
       },
       audio: false,
+    })
+    .then((stream) => {
+      cameraReady = true;
+      updateStage();
+      return stream;
     });
 
+  const modelWhenReady = loadModel().then((landmarker) => {
+    modelReady = true;
+    updateStage();
+    return landmarker;
+  });
+
+  // Some environments never settle the camera request (in-app browsers that
+  // can't show a permission prompt, or a camera held by another app) — time
+  // out with a useful message instead of hanging forever.
+  const cameraWithTimeout = Promise.race([
+    cameraPromise,
+    new Promise((_, reject) =>
+      setTimeout(() => {
+        const err = new Error("camera request timed out");
+        err.name = "CameraTimeoutError";
+        reject(err);
+      }, 15000)
+    ),
+  ]);
+
+  const modelSlowTimer = setTimeout(() => {
+    if (!modelReady) {
+      setStatus(
+        "Still loading the face detection model — big download. If it never finishes, reload the page."
+      );
+    }
+  }, 20000);
+
+  try {
     const [landmarkerResult, stream] = await Promise.all([
-      loadModel(),
-      cameraPromise,
+      cameraWithTimeout,
+      modelWhenReady,
     ]);
+    clearTimeout(modelSlowTimer);
+
     landmarker = landmarkerResult;
-
     video.srcObject = stream;
-    await video.play();
 
+    // Un-hide before play(): iOS won't render a display:none video, and don't
+    // block on play() — some browsers never resolve it, and the frame loop
+    // already waits for frames to arrive on its own.
     video.hidden = false;
     canvas.hidden = false;
     overlay.hidden = true;
+    video.play().catch((err) => console.error("video.play() failed:", err));
+
     hud.hidden = false;
     hud.textContent = "Looking for faces…";
-
     running = true;
     lastVideoTime = -1;
     lastT = performance.now();
     requestAnimationFrame(frame);
   } catch (err) {
+    clearTimeout(modelSlowTimer);
     console.error(err);
     startBtn.disabled = false;
-    if (err && (err.name === "NotAllowedError" || err.name === "PermissionDeniedError")) {
-      setStatus("Camera access was denied. Allow it in your browser settings and try again.");
+    if (err && err.name === "CameraTimeoutError") {
+      setStatus(
+        "Timed out waiting for the camera. In-app/embedded browsers often can't show the permission prompt — try opening this page in Safari or Chrome. (Is another app using the camera?)"
+      );
+    } else if (
+      err &&
+      (err.name === "NotAllowedError" || err.name === "PermissionDeniedError")
+    ) {
+      setStatus(
+        "Camera access was denied. Allow it in your browser settings and try again."
+      );
     } else if (err && err.name === "NotFoundError") {
       setStatus("No camera was found on this device.");
     } else {
