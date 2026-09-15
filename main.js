@@ -4,6 +4,7 @@ import {
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
 const video = document.getElementById("video");
+const videoBg = document.getElementById("video-bg");
 const canvas = document.getElementById("canvas");
 const overlay = document.getElementById("overlay");
 const hud = document.getElementById("hud");
@@ -236,13 +237,13 @@ function initSettings() {
 }
 
 // MediaPipe gives normalized coords relative to the video frame; the video is
-// drawn with object-fit: cover and mirrored, so map into display space here.
+// drawn with object-fit: contain (mirrored), so map into display space here.
 function mapPoint(nx, ny) {
   const vw = video.videoWidth || 1;
   const vh = video.videoHeight || 1;
   const dw = canvas.clientWidth;
   const dh = canvas.clientHeight;
-  const scale = Math.max(dw / vw, dh / vh);
+  const scale = Math.min(dw / vw, dh / vh);
   const ox = (dw - vw * scale) / 2;
   const oy = (dh - vh * scale) / 2;
   return { x: ox + (1 - nx) * vw * scale, y: oy + ny * vh * scale };
@@ -555,11 +556,9 @@ async function start() {
 
   const cameraPromise = navigator.mediaDevices
     .getUserMedia({
-      video: {
-        facingMode: "user",
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-      },
+      // Width only: asking for a 16:9 shape makes 4:3 sensors crop (digital
+      // zoom). Leaving the height unset returns the camera's native framing.
+      video: { facingMode: "user", width: { ideal: 1280 } },
       audio: false,
     })
     .then((stream) => {
@@ -607,14 +606,17 @@ async function start() {
 
     landmarker = landmarkerResult;
     video.srcObject = stream;
+    videoBg.srcObject = stream;
 
     // Un-hide before play(): iOS won't render a display:none video, and don't
     // block on play() — some browsers never resolve it, and the frame loop
     // already waits for frames to arrive on its own.
     video.hidden = false;
+    videoBg.hidden = false;
     canvas.hidden = false;
     overlay.hidden = true;
     video.play().catch((err) => console.error("video.play() failed:", err));
+    videoBg.play().catch((err) => console.error("videoBg.play() failed:", err));
 
     hud.hidden = false;
     hud.textContent = "Looking for faces…";

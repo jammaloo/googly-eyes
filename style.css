@@ -29,15 +29,27 @@ body {
   touch-action: manipulation;
 }
 
-/* Camera feed fills the screen, mirrored like a selfie view. */
+/* Blurred, over-scanned copy of the feed that fills the letterbox bars when
+   the camera and window aspects differ — the sharp video on top always shows
+   the camera's full field of view, never a crop of it. */
+#video-bg {
+  position: fixed;
+  inset: -48px;
+  object-fit: cover;
+  transform: scaleX(-1);
+  filter: blur(28px) saturate(1.1) brightness(0.75);
+  background: #000;
+  pointer-events: none;
+}
+
+/* The camera feed fills the screen as far as possible without cropping. */
 #video {
   position: fixed;
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   transform: scaleX(-1);
-  background: #000;
 }
 
 #canvas {
